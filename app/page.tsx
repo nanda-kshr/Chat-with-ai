@@ -10,7 +10,7 @@ interface Message {
 }
 
 const PROVIDERS: { id: Provider; name: string; defaultModel: string; placeholderKey: string }[] = [
-  { id: "openrouter", name: "OpenRouter", defaultModel: "openai/gpt-4o-mini", placeholderKey: "sk-or-..." },
+  { id: "openrouter", name: "OpenRouter", defaultModel: "anthropic/claude-opus-5.5", placeholderKey: "sk-or-..." },
   { id: "openai", name: "OpenAI", defaultModel: "gpt-4o-mini", placeholderKey: "sk-..." },
   { id: "google", name: "Google AI", defaultModel: "gemini-1.5-flash", placeholderKey: "AIzaSy..." },
   { id: "anthropic", name: "Anthropic", defaultModel: "claude-3-5-sonnet-20241022", placeholderKey: "sk-ant-..." },
@@ -25,16 +25,18 @@ function getStored(key: string, fallback: string = ""): string {
 }
 
 export default function Home() {
-  const [provider, setProvider] = useState<Provider>("openai");
-  const [apiKey, setApiKey] = useState<string>(() => getStored("chat_key_openai"));
-  const [model, setModel] = useState<string>(() => getStored("chat_model_openai"));
-  const [baseUrl, setBaseUrl] = useState<string>(() => getStored("chat_url_openai"));
+  const [provider, setProvider] = useState<Provider>("openrouter");
+  const [apiKey, setApiKey] = useState<string>(() => getStored("chat_key_openrouter"));
+  const [model, setModel] = useState<string>(() => getStored("chat_model_openrouter"));
+  const [baseUrl, setBaseUrl] = useState<string>(() => getStored("chat_url_openrouter"));
   const [systemPrompt, setSystemPrompt] = useState<string>(() => getStored("chat_system_prompt"));
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [showKey, setShowKey] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editText, setEditText] = useState("");
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -67,14 +69,22 @@ export default function Home() {
     localStorage.setItem("chat_system_prompt", val);
   };
 
+  const handleClearStorage = () => {
+    if (typeof window !== "undefined" && window.confirm("Clear all stored data from localStorage?")) {
+      localStorage.clear();
+      setApiKey("");
+      setModel("");
+      setBaseUrl(provider === "ollama" ? "http://127.0.0.1:11434" : "");
+      setSystemPrompt("");
+    }
+  };
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
-  const sendMessage = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    const trimmed = input.trim();
-    if (!trimmed || loading) return;
+  const sendChat = async (msgsToSend: Message[]) => {
+    if (loading) return;
 
     if (provider !== "ollama" && !apiKey.trim()) {
       setError(`Please enter your ${provider.toUpperCase()} API key.`);
@@ -82,9 +92,7 @@ export default function Home() {
     }
 
     setError(null);
-    const newMessages: Message[] = [...messages, { role: "user", content: trimmed }];
-    setMessages(newMessages);
-    setInput("");
+    setMessages(msgsToSend);
     setLoading(true);
 
     try {
@@ -97,7 +105,7 @@ export default function Home() {
           model: model.trim() || undefined,
           baseUrl: baseUrl.trim() || undefined,
           systemPrompt: systemPrompt.trim() || undefined,
-          messages: newMessages,
+          messages: msgsToSend,
         }),
       });
 
@@ -113,6 +121,25 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const sendMessage = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const trimmed = input.trim();
+    if (!trimmed || loading) return;
+    setInput("");
+    await sendChat([...messages, { role: "user", content: trimmed }]);
+  };
+
+  const handleEditSubmit = async (index: number) => {
+    const trimmed = editText.trim();
+    if (!trimmed || loading) return;
+    setEditingIndex(null);
+    const updatedMessages: Message[] = [
+      ...messages.slice(0, index),
+      { role: "user", content: trimmed },
+    ];
+    await sendChat(updatedMessages);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -215,6 +242,19 @@ export default function Home() {
             className="flex-1 px-2.5 py-1 rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
         </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-[11px] text-zinc-400">
+          <span>
+            In case you don&apos;t trust any website or extension you have installed, clear local storage before going.
+          </span>
+          <button
+            type="button"
+            onClick={handleClearStorage}
+            className="text-red-500 hover:text-red-600 hover:underline cursor-pointer font-medium"
+          >
+            Clear Local Storage
+          </button>
+        </div>
       </header>
 
       {/* Error banner */}
@@ -237,18 +277,67 @@ export default function Home() {
               key={index}
               className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}
             >
-              <span className="text-[11px] text-zinc-400 mb-1 px-1 capitalize">
-                {msg.role === "user" ? "You" : activeProviderConfig?.name || "AI"}
-              </span>
-              <div
-                className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap leading-relaxed ${
-                  msg.role === "user"
-                    ? "bg-blue-600 text-white rounded-br-none"
-                    : "bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 rounded-bl-none"
-                }`}
-              >
-                {msg.content}
+              <div className="flex items-center gap-2 mb-1 px-1">
+                {msg.role === "user" && editingIndex !== index && (
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => {
+                      setEditingIndex(index);
+                      setEditText(msg.content);
+                    }}
+                    className="text-[11px] text-zinc-400 hover:text-blue-500 cursor-pointer disabled:opacity-50"
+                  >
+                    Edit
+                  </button>
+                )}
+                <span className="text-[11px] text-zinc-400 capitalize">
+                  {msg.role === "user" ? "You" : activeProviderConfig?.name || "AI"}
+                </span>
               </div>
+              {msg.role === "user" && editingIndex === index ? (
+                <div className="w-full max-w-[85%] flex flex-col gap-2">
+                  <textarea
+                    rows={3}
+                    value={editText}
+                    onChange={(e) => setEditText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        handleEditSubmit(index);
+                      }
+                    }}
+                    className="w-full p-2.5 rounded-xl border border-blue-500 bg-white dark:bg-zinc-900 text-sm focus:outline-none text-zinc-900 dark:text-zinc-100"
+                  />
+                  <div className="flex justify-end gap-2 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setEditingIndex(null)}
+                      className="px-3 py-1 rounded-lg border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={loading || !editText.trim()}
+                      onClick={() => handleEditSubmit(index)}
+                      className="px-3 py-1 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 cursor-pointer font-medium"
+                    >
+                      Send
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div
+                  className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap leading-relaxed ${
+                    msg.role === "user"
+                      ? "bg-blue-600 text-white rounded-br-none"
+                      : "bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 rounded-bl-none"
+                  }`}
+                >
+                  {msg.content}
+                </div>
+              )}
             </div>
           ))
         )}

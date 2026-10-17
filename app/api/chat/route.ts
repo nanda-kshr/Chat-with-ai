@@ -81,7 +81,7 @@ export async function POST(req: NextRequest) {
             Authorization: `Bearer ${apiKey}`,
           },
           body: JSON.stringify({
-            model: model || "openai/gpt-4o-mini",
+            model: model || "anthropic/claude-opus-5.5",
             messages: formattedMessages,
           }),
         });
