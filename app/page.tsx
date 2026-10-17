@@ -10,13 +10,14 @@ interface Message {
 }
 
 const PROVIDERS: { id: Provider; name: string; defaultModel: string; placeholderKey: string }[] = [
-  { id: "openai", name: "OpenAI", defaultModel: "gpt-4o-mini", placeholderKey: "sk-..." },
   { id: "openrouter", name: "OpenRouter", defaultModel: "openai/gpt-4o-mini", placeholderKey: "sk-or-..." },
+  { id: "openai", name: "OpenAI", defaultModel: "gpt-4o-mini", placeholderKey: "sk-..." },
   { id: "google", name: "Google AI", defaultModel: "gemini-1.5-flash", placeholderKey: "AIzaSy..." },
   { id: "anthropic", name: "Anthropic", defaultModel: "claude-3-5-sonnet-20241022", placeholderKey: "sk-ant-..." },
   { id: "ollama", name: "Ollama (Local)", defaultModel: "llama3", placeholderKey: "Optional key" },
   { id: "custom", name: "Custom (OpenAI-compatible)", defaultModel: "default", placeholderKey: "API key" },
 ];
+
 
 function getStored(key: string, fallback: string = ""): string {
   if (typeof window === "undefined") return fallback;
@@ -28,6 +29,7 @@ export default function Home() {
   const [apiKey, setApiKey] = useState<string>(() => getStored("chat_key_openai"));
   const [model, setModel] = useState<string>(() => getStored("chat_model_openai"));
   const [baseUrl, setBaseUrl] = useState<string>(() => getStored("chat_url_openai"));
+  const [systemPrompt, setSystemPrompt] = useState<string>(() => getStored("chat_system_prompt"));
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -60,6 +62,11 @@ export default function Home() {
     localStorage.setItem(`chat_url_${provider}`, val);
   };
 
+  const handleSystemPromptChange = (val: string) => {
+    setSystemPrompt(val);
+    localStorage.setItem("chat_system_prompt", val);
+  };
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
@@ -89,6 +96,7 @@ export default function Home() {
           apiKey: apiKey.trim(),
           model: model.trim() || undefined,
           baseUrl: baseUrl.trim() || undefined,
+          systemPrompt: systemPrompt.trim() || undefined,
           messages: newMessages,
         }),
       });
@@ -194,6 +202,18 @@ export default function Home() {
               Clear Chat
             </button>
           )}
+        </div>
+
+        <div className="flex items-center gap-1.5 text-xs text-zinc-500">
+          <span className="whitespace-nowrap">System Prompt:</span>
+          <input
+            type="text"
+            value={systemPrompt}
+            onChange={(e) => handleSystemPromptChange(e.target.value)}
+            placeholder="Optional system instructions (e.g. You are a helpful assistant)"
+            suppressHydrationWarning
+            className="flex-1 px-2.5 py-1 rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
         </div>
       </header>
 

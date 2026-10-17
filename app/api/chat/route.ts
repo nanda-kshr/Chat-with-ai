@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { provider, apiKey, model, baseUrl, messages } = await req.json();
+    const { provider, apiKey, model, baseUrl, systemPrompt, messages } = await req.json();
 
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return NextResponse.json({ error: "Messages array is required." }, { status: 400 });
@@ -43,6 +43,14 @@ export async function POST(req: NextRequest) {
     if (provider !== "ollama" && !apiKey) {
       return NextResponse.json({ error: `API key is required for ${provider}.` }, { status: 400 });
     }
+
+    const effectiveSystemPrompt = systemPrompt || messages.find((m: { role: string }) => m.role === "system")?.content;
+    const formattedMessages = effectiveSystemPrompt
+      ? [
+          { role: "system", content: effectiveSystemPrompt },
+          ...messages.filter((m: { role: string }) => m.role !== "system"),
+        ]
+      : messages;
 
     let responseText = "";
 
@@ -56,7 +64,7 @@ export async function POST(req: NextRequest) {
           },
           body: JSON.stringify({
             model: model || "gpt-4o-mini",
-            messages,
+            messages: formattedMessages,
           }),
         });
         const data = await res.json();
@@ -74,7 +82,7 @@ export async function POST(req: NextRequest) {
           },
           body: JSON.stringify({
             model: model || "openai/gpt-4o-mini",
-            messages,
+            messages: formattedMessages,
           }),
         });
         const data = await res.json();
@@ -93,7 +101,7 @@ export async function POST(req: NextRequest) {
           },
           body: JSON.stringify({
             model: model || "llama3",
-            messages,
+            messages: formattedMessages,
           }),
         });
         const data = await res.json();
@@ -103,7 +111,6 @@ export async function POST(req: NextRequest) {
       }
 
       case "anthropic": {
-        const systemMessage = messages.find((m: { role: string }) => m.role === "system")?.content;
         const nonSystemMessages = messages
           .filter((m: { role: string }) => m.role !== "system")
           .map((m: { role: string; content: string }) => ({
@@ -121,7 +128,7 @@ export async function POST(req: NextRequest) {
           body: JSON.stringify({
             model: model || "claude-3-5-sonnet-20241022",
             max_tokens: 1024,
-            ...(systemMessage ? { system: systemMessage } : {}),
+            ...(effectiveSystemPrompt ? { system: effectiveSystemPrompt } : {}),
             messages: nonSystemMessages,
           }),
         });
@@ -145,7 +152,10 @@ export async function POST(req: NextRequest) {
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ contents }),
+            body: JSON.stringify({
+              contents,
+              ...(effectiveSystemPrompt ? { system_instruction: { parts: [{ text: effectiveSystemPrompt }] } } : {}),
+            }),
           }
         );
         const data = await res.json();
@@ -167,7 +177,7 @@ export async function POST(req: NextRequest) {
           },
           body: JSON.stringify({
             model: model || "default",
-            messages,
+            messages: formattedMessages,
           }),
         });
         const data = await res.json();
