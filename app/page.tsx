@@ -19,9 +19,37 @@ const PROVIDERS: { id: Provider; name: string; defaultModel: string; placeholder
 ];
 
 
+interface SavedPrompt {
+  id: string;
+  name: string;
+  prompt: string;
+}
+
+const DEFAULT_PROMPTS: SavedPrompt[] = [
+  { id: "none", name: "None (Default)", prompt: "" },
+  { id: "helpful", name: "Helpful Assistant", prompt: "You are a helpful and concise AI assistant." },
+  { id: "coder", name: "Code Expert", prompt: "You are an expert software engineer. Provide clean, efficient code and concise explanations." },
+  { id: "teacher", name: "Teacher / Explainer", prompt: "Explain concepts simply with clear real-world examples and step-by-step reasoning." },
+];
+
 function getStored(key: string, fallback: string = ""): string {
   if (typeof window === "undefined") return fallback;
   return localStorage.getItem(key) || fallback;
+}
+
+function getStoredPrompts(): SavedPrompt[] {
+  if (typeof window === "undefined") return DEFAULT_PROMPTS;
+  const raw = localStorage.getItem("chat_saved_prompts");
+  if (!raw) return DEFAULT_PROMPTS;
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return parsed;
+    }
+  } catch {
+    // fallback
+  }
+  return DEFAULT_PROMPTS;
 }
 
 export default function Home() {
@@ -29,7 +57,19 @@ export default function Home() {
   const [apiKey, setApiKey] = useState<string>(() => getStored("chat_key_openrouter"));
   const [model, setModel] = useState<string>(() => getStored("chat_model_openrouter"));
   const [baseUrl, setBaseUrl] = useState<string>(() => getStored("chat_url_openrouter"));
+  const [savedPrompts, setSavedPrompts] = useState<SavedPrompt[]>(getStoredPrompts);
+  const [selectedPromptId, setSelectedPromptId] = useState<string>(() => {
+    const storedId = getStored("chat_selected_prompt_id");
+    if (storedId) return storedId;
+    const current = getStored("chat_system_prompt");
+    if (!current) return "none";
+    const match = DEFAULT_PROMPTS.find((p) => p.prompt === current);
+    return match ? match.id : "custom";
+  });
   const [systemPrompt, setSystemPrompt] = useState<string>(() => getStored("chat_system_prompt"));
+  const [isSavingPrompt, setIsSavingPrompt] = useState(false);
+  const [newPromptName, setNewPromptName] = useState("");
+  const [newPromptContent, setNewPromptContent] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -64,9 +104,67 @@ export default function Home() {
     localStorage.setItem(`chat_url_${provider}`, val);
   };
 
+  const handleSelectPrompt = (id: string) => {
+    setSelectedPromptId(id);
+    localStorage.setItem("chat_selected_prompt_id", id);
+    if (id !== "custom") {
+      const found = savedPrompts.find((p) => p.id === id);
+      if (found) {
+        setSystemPrompt(found.prompt);
+        localStorage.setItem("chat_system_prompt", found.prompt);
+      }
+    }
+  };
+
   const handleSystemPromptChange = (val: string) => {
     setSystemPrompt(val);
     localStorage.setItem("chat_system_prompt", val);
+    const active = savedPrompts.find((p) => p.id === selectedPromptId);
+    if (!active || active.prompt !== val) {
+      setSelectedPromptId("custom");
+      localStorage.setItem("chat_selected_prompt_id", "custom");
+    }
+  };
+
+  const handleOpenSavePrompt = () => {
+    setNewPromptName("");
+    setNewPromptContent(systemPrompt);
+    setIsSavingPrompt(true);
+  };
+
+  const handleSaveNewPrompt = () => {
+    const name = newPromptName.trim();
+    const prompt = newPromptContent.trim();
+    if (!name || !prompt) return;
+
+    const newPrompt: SavedPrompt = {
+      id: `custom_${Date.now()}`,
+      name,
+      prompt,
+    };
+
+    const updated = [...savedPrompts, newPrompt];
+    setSavedPrompts(updated);
+    localStorage.setItem("chat_saved_prompts", JSON.stringify(updated));
+
+    setSelectedPromptId(newPrompt.id);
+    localStorage.setItem("chat_selected_prompt_id", newPrompt.id);
+
+    setSystemPrompt(newPrompt.prompt);
+    localStorage.setItem("chat_system_prompt", newPrompt.prompt);
+
+    setIsSavingPrompt(false);
+  };
+
+  const handleDeletePrompt = (idToDelete: string) => {
+    const updated = savedPrompts.filter((p) => p.id !== idToDelete);
+    setSavedPrompts(updated);
+    localStorage.setItem("chat_saved_prompts", JSON.stringify(updated));
+
+    setSelectedPromptId("none");
+    localStorage.setItem("chat_selected_prompt_id", "none");
+    setSystemPrompt("");
+    localStorage.setItem("chat_system_prompt", "");
   };
 
   const handleClearStorage = () => {
@@ -76,6 +174,8 @@ export default function Home() {
       setModel("");
       setBaseUrl(provider === "ollama" ? "http://127.0.0.1:11434" : "");
       setSystemPrompt("");
+      setSavedPrompts(DEFAULT_PROMPTS);
+      setSelectedPromptId("none");
     }
   };
 
@@ -231,15 +331,56 @@ export default function Home() {
           )}
         </div>
 
-        <div className="flex items-center gap-1.5 text-xs text-zinc-500">
-          <span className="whitespace-nowrap">System Prompt:</span>
-          <input
-            type="text"
+        <div className="flex flex-col gap-1.5 text-xs text-zinc-500">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="whitespace-nowrap font-semibold text-zinc-700 dark:text-zinc-300">
+                System Prompt:
+              </span>
+              <select
+                value={selectedPromptId}
+                onChange={(e) => handleSelectPrompt(e.target.value)}
+                suppressHydrationWarning
+                className="px-2.5 py-1 rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                {selectedPromptId === "custom" && (
+                  <option value="custom">Custom (Modified)</option>
+                )}
+                {savedPrompts.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+
+              {!DEFAULT_PROMPTS.some((p) => p.id === selectedPromptId) && selectedPromptId !== "custom" && (
+                <button
+                  type="button"
+                  onClick={() => handleDeletePrompt(selectedPromptId)}
+                  className="text-red-500 hover:text-red-600 hover:underline cursor-pointer"
+                  title="Delete this saved prompt"
+                >
+                  Delete
+                </button>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={handleOpenSavePrompt}
+              className="text-blue-600 dark:text-blue-400 hover:underline cursor-pointer font-medium"
+            >
+              + Save as New
+            </button>
+          </div>
+
+          <textarea
+            rows={2}
             value={systemPrompt}
             onChange={(e) => handleSystemPromptChange(e.target.value)}
             placeholder="Optional system instructions (e.g. You are a helpful assistant)"
             suppressHydrationWarning
-            className="flex-1 px-2.5 py-1 rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full px-2.5 py-1.5 rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-xs text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-y"
           />
         </div>
 
@@ -371,6 +512,59 @@ export default function Home() {
           Send
         </button>
       </form>
+
+      {/* Save Prompt Modal */}
+      {isSavingPrompt && (
+        <div
+          className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+          onClick={() => setIsSavingPrompt(false)}
+        >
+          <div
+            className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl max-w-md w-full p-4 shadow-xl flex flex-col gap-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Save System Prompt</h3>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-zinc-500">Prompt Name</label>
+              <input
+                type="text"
+                value={newPromptName}
+                onChange={(e) => setNewPromptName(e.target.value)}
+                placeholder="e.g. Code Reviewer"
+                autoFocus
+                className="px-2.5 py-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-zinc-100"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-zinc-500">Prompt Content</label>
+              <textarea
+                rows={4}
+                value={newPromptContent}
+                onChange={(e) => setNewPromptContent(e.target.value)}
+                placeholder="Enter system prompt instructions..."
+                className="px-2.5 py-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-zinc-100 resize-y"
+              />
+            </div>
+            <div className="flex justify-end gap-2 text-xs pt-1">
+              <button
+                type="button"
+                onClick={() => setIsSavingPrompt(false)}
+                className="px-3 py-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!newPromptName.trim() || !newPromptContent.trim()}
+                onClick={handleSaveNewPrompt}
+                className="px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 cursor-pointer font-medium"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
